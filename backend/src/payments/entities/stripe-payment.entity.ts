@@ -52,6 +52,13 @@ export class StripePayment {
   @Column({ type: 'text', nullable: true })
   fraudReason: string | null;
 
+  /**
+   * Stripe-side payment timing (charge / payment_intent / session), used for velocity.
+   * Row `createdAt` reflects when the worker persisted the record and can cluster falsely.
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  checkoutPaidAt: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }

@@ -2,10 +2,15 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
   Post,
+  Put,
   RawBody,
   UseGuards,
 } from '@nestjs/common';
@@ -19,11 +24,17 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ConfirmCheckoutSessionDto } from './dto/confirm-checkout-session.dto';
 import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
+import { UpdateFraudSystemPromptDto } from './dto/update-fraud-system-prompt.dto';
+import { UpdatePaymentFraudReviewDto } from './dto/update-payment-fraud-review.dto';
+import { FraudPromptService } from './fraud-prompt.service';
 import { PaymentsService } from './payments.service';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly fraudPromptService: FraudPromptService,
+  ) {}
 
   @Post('checkout-session')
   @UseGuards(JwtAuthGuard)
@@ -54,6 +65,37 @@ export class PaymentsController {
   @Roles(Role.ADMIN)
   listAllPaymentsForAdmin() {
     return this.paymentsService.listAllForAdmin();
+  }
+
+  @Get('admin/fraud-prompt')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  getFraudSystemPrompt() {
+    return this.fraudPromptService.getAdminView();
+  }
+
+  @Put('admin/fraud-prompt')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  updateFraudSystemPrompt(@Body() dto: UpdateFraudSystemPromptDto) {
+    return this.fraudPromptService.saveAdminPrompt(dto.systemPrompt);
+  }
+
+  @Delete('admin/fraud-prompt')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  clearFraudSystemPrompt() {
+    return this.fraudPromptService.clearStoredPrompt();
+  }
+
+  @Patch('admin/:paymentId/fraud-review')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  updatePaymentFraudReview(
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Body() dto: UpdatePaymentFraudReviewDto,
+  ) {
+    return this.paymentsService.updateFraudReviewByAdmin(paymentId, dto.status);
   }
 
   @Post('confirm-session')

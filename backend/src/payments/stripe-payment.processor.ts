@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job } from 'bullmq';
 import Stripe from 'stripe';
-import { MoreThan, QueryFailedError, Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { GroqFraudService } from './groq-fraud.service';
 import { StripePayment } from './entities/stripe-payment.entity';
@@ -31,6 +31,28 @@ function isUuid(value: string): boolean {
 export type StripeCheckoutJobPayload = {
   sessionId: string;
 };
+
+/** Prefer charge time (actual capture), then PI creation, then session creation. */
+function resolveCheckoutPaidAt(session: StripeCheckoutSession): Date {
+  const pi = session.payment_intent;
+  if (pi && typeof pi === 'object') {
+    const lc = pi.latest_charge;
+    if (
+      lc &&
+      typeof lc === 'object' &&
+      typeof (lc as { created?: unknown }).created === 'number'
+    ) {
+      return new Date((lc as { created: number }).created * 1000);
+    }
+    if (typeof pi.created === 'number') {
+      return new Date(pi.created * 1000);
+    }
+  }
+  if (typeof session.created === 'number') {
+    return new Date(session.created * 1000);
+  }
+  return new Date();
+}
 
 @Processor(STRIPE_PAYMENT_FRAUD_QUEUE)
 export class StripePaymentProcessor extends WorkerHost {
@@ -59,7 +81,7 @@ export class StripePaymentProcessor extends WorkerHost {
     const sessionId = job.data.sessionId;
     const session = await this.stripe.checkout.sessions.retrieve(sessionId, {
       expand: [
-        'payment_intent',
+        'payment_intent.latest_charge',
         'subscription',
         'line_items.data.price.product',
         'invoice.lines.data.price',
@@ -111,54 +133,33 @@ export class StripePaymentProcessor extends WorkerHost {
       groqVerdict = { fraudulent: false, reason: null };
     }
 
-    const velocityFlag =
-      priorInWindow >= FRAUD_VELOCITY_PAYMENT_THRESHOLD - 1;
-    const verdict = this.mergeVelocityVerdict(
-      groqVerdict,
-      velocityFlag,
-      priorInWindow,
-    );
-    if (velocityFlag) {
-      this.logger.warn(
-        `Velocity rule: user/email had ${priorInWindow} prior payment(s) in ${FRAUD_VELOCITY_WINDOW_MS / 60000}min window → flagged (session=${session.id})`,
+    if (priorInWindow >= FRAUD_VELOCITY_PAYMENT_THRESHOLD - 1) {
+      this.logger.debug(
+        `Velocity context for model: priorInWindow=${priorInWindow} session=${session.id}`,
       );
     }
 
-    await this.savePaymentFromStripeSession(session, verdict);
+    await this.savePaymentFromStripeSession(session, groqVerdict);
   }
 
-  /** Prior rows in DB for same user (UUID) or same customer email within the velocity window. */
   private async countCompletedPaymentsInVelocityWindow(
     userId: string | null,
     email: string | null,
   ): Promise<number> {
     const since = new Date(Date.now() - FRAUD_VELOCITY_WINDOW_MS);
+    const qb = this.paymentRepo
+      .createQueryBuilder('p')
+      .where('COALESCE(p.checkoutPaidAt, p.createdAt) > :since', { since });
     if (userId) {
-      return this.paymentRepo.count({
-        where: { user: { id: userId }, createdAt: MoreThan(since) },
+      qb.andWhere('p.userId = :userId', { userId });
+    } else if (email) {
+      qb.andWhere('LOWER(TRIM(p.customerEmail)) = :email', {
+        email: email.toLowerCase(),
       });
+    } else {
+      return 0;
     }
-    if (email) {
-      return this.paymentRepo.count({
-        where: { customerEmail: email, createdAt: MoreThan(since) },
-      });
-    }
-    return 0;
-  }
-
-  private mergeVelocityVerdict(
-    groq: { fraudulent: boolean; reason: string | null },
-    velocityFlag: boolean,
-    priorInWindow: number,
-  ): { fraudulent: boolean; reason: string | null } {
-    if (!velocityFlag) {
-      return groq;
-    }
-    const velocityMsg = `[Velocity] ${FRAUD_VELOCITY_PAYMENT_THRESHOLD}+ payments within ${FRAUD_VELOCITY_WINDOW_MS / 60000} minutes for this account (prior completed in window: ${priorInWindow}).`;
-    if (!groq.fraudulent || !groq.reason) {
-      return { fraudulent: true, reason: velocityMsg };
-    }
-    return { fraudulent: true, reason: `${velocityMsg} ${groq.reason}` };
+    return qb.getCount();
   }
 
   private async savePaymentFromStripeSession(
@@ -179,8 +180,10 @@ export class StripePaymentProcessor extends WorkerHost {
     const user: User | null =
       ref && isUuid(ref) ? ({ id: ref } as User) : null;
 
-    const email =
+    const emailRaw =
       session.customer_details?.email ?? session.customer_email ?? null;
+    const email = emailRaw?.trim() ? emailRaw.trim().toLowerCase() : null;
+    const checkoutPaidAt = resolveCheckoutPaidAt(session);
 
     const row = this.paymentRepo.create({
       stripeCheckoutSessionId: session.id,
@@ -193,6 +196,7 @@ export class StripePaymentProcessor extends WorkerHost {
       paymentStatus: session.payment_status ?? 'unknown',
       customerEmail: email,
       user,
+      checkoutPaidAt,
       fraudFlagged: verdict.fraudulent,
       fraudReason: verdict.fraudulent ? verdict.reason : null,
     });

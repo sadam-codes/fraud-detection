@@ -1,35 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { FraudPromptService } from './fraud-prompt.service';
 
 export type GroqFraudVerdict = {
   fraudulent: boolean;
   reason: string | null;
 };
 
-const SYSTEM = `You are a payment fraud analyst for Stripe checkouts.
-Review the transaction summary and apply these rules:
-- If the summary includes a line like velocity_prior_completed_checkouts_same_user_last_3min=N where N is 2 or greater, treat this as the 3rd (or more) payment within ~3 minutes for that user — you MUST set fraudulent=true with a short velocity reason (this is an intentional easy-test rule).
-- Flag if amounts, currency, or line items look inconsistent or impossible (e.g. zero or negative totals where payment should have occurred).
-- Flag if customer identity signals are incoherent (obviously fake or disposable patterns combined with high value) when the data supports that conclusion.
-- Flag if subscription vs one-time signals contradict the described mode.
-- Do NOT flag solely because the payment is a test or small amount; tests are allowed.
-- Prefer clearing legitimate-looking payments; only flag when evidence in the text supports suspicion.
-
-Respond with a single JSON object only, no markdown, shape:
-{"fraudulent": boolean, "reason": string | null}
-If fraudulent is false, reason must be null. If true, reason must be a short factual explanation (max 400 chars).`;
-
 @Injectable()
 export class GroqFraudService {
   private readonly logger = new Logger(GroqFraudService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly fraudPrompt: FraudPromptService,
+  ) {}
 
-  /**
-   * Local / staging testing: set env `FRAUD_MOCK_VERDICT=flagged` or `cleared`
-   * to skip Groq and force a verdict (queue → DB → frontend). Ignored when
-   * `NODE_ENV=production`. Remove the variable for real model behaviour.
-   */
   async analyzeTransactionSummary(summary: string): Promise<GroqFraudVerdict> {
     const mock = this.config.get<string>('FRAUD_MOCK_VERDICT')?.trim().toLowerCase();
     if (mock === 'flagged' || mock === 'cleared') {
@@ -54,6 +40,8 @@ export class GroqFraudService {
       }
     }
 
+    const systemPrompt = await this.fraudPrompt.getEffectiveSystemPrompt();
+
     const apiKey = this.config.getOrThrow<string>('GROQ_API_KEY');
     const model =
       this.config.get<string>('GROQ_MODEL')?.trim() ||
@@ -77,7 +65,7 @@ export class GroqFraudService {
           temperature: 0.1,
           response_format: { type: 'json_object' },
           messages: [
-            { role: 'system', content: SYSTEM },
+            { role: 'system', content: systemPrompt },
             {
               role: 'user',
               content: `Transaction summary for fraud review:\n\n${summary}`,
@@ -108,7 +96,7 @@ export class GroqFraudService {
       fraudulent: Boolean(parsed.fraudulent),
       reason:
         parsed.fraudulent && typeof parsed.reason === 'string'
-          ? parsed.reason.slice(0, 2000)
+          ? parsed.reason.slice(0, 500)
           : null,
     };
   }

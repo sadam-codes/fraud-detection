@@ -1,7 +1,9 @@
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import AccountPage from './pages/AccountPage'
-import AdminPage from './pages/AdminPage'
+import AdminLayout from './pages/admin/AdminLayout'
+import AdminFraudPromptPage from './pages/admin/AdminFraudPromptPage'
+import AdminPaymentsPage from './pages/admin/AdminPaymentsPage'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import PaymentCancelPage from './pages/PaymentCancelPage'
@@ -45,9 +47,9 @@ function AppShell({ children }) {
                 ) : null}
                 {user.role === 'admin' ? (
                   <Link
-                    to="/admin"
+                    to="/admin/payments"
                     className={`rounded-full px-3 py-1.5 transition ${
-                      location.pathname === '/admin'
+                      location.pathname.startsWith('/admin')
                         ? 'bg-indigo-100 text-indigo-800'
                         : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                     }`}
@@ -98,14 +100,7 @@ function AppShell({ children }) {
       <main className="flex w-full flex-1 flex-col px-4 py-10 sm:px-6 sm:py-12 lg:px-8 lg:py-14">
         <div className="mx-auto w-full max-w-6xl flex-1">{children}</div>
       </main>
-      <footer className="border-t border-slate-200/80 bg-white/60 py-8 text-center text-xs text-slate-500 backdrop-blur-sm">
-        <p className="mx-auto max-w-6xl px-4">
-          Development · API{' '}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-700">
-            {import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}
-          </code>
-        </p>
-      </footer>
+     
     </div>
   )
 }
@@ -118,7 +113,11 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/account" element={<AccountPage />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<Navigate to="/admin/payments" replace />} />
+          <Route path="payments" element={<AdminPaymentsPage />} />
+          <Route path="fraud-prompt" element={<AdminFraudPromptPage />} />
+        </Route>
         <Route path="/payment/success" element={<PaymentSuccessPage />} />
         <Route path="/payment/cancel" element={<PaymentCancelPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import { Card, SectionLabel } from '../components/PagePrimitives'
 import { useAuth } from '../context/AuthContext'
 import { apiJson } from '../lib/api'
+import { dashboardPath } from '../lib/paths'
 
 function formatMoney(amount, currency) {
   if (amount == null || !currency) return '—'
@@ -51,9 +52,16 @@ function PaymentHistorySkeleton() {
   )
 }
 
+const ACCOUNT_DEFAULT_PRICE_ID =
+  typeof import.meta.env.VITE_ACCOUNT_DEFAULT_PRICE_ID === 'string'
+    ? import.meta.env.VITE_ACCOUNT_DEFAULT_PRICE_ID.trim()
+    : ''
+/** Shown when no env prefill (whole number = client demo billing field). */
+const DEFAULT_PRICE_FIELD_VALUE = ACCOUNT_DEFAULT_PRICE_ID || '10'
+
 export default function AccountPage() {
-  const { user, ready, logout } = useAuth()
-  const [priceId, setPriceId] = useState('')
+  const { user, ready } = useAuth()
+  const [priceId, setPriceId] = useState(DEFAULT_PRICE_FIELD_VALUE)
   const [payError, setPayError] = useState('')
   const [payPending, setPayPending] = useState(false)
   const [payments, setPayments] = useState([])
@@ -116,20 +124,8 @@ export default function AccountPage() {
     return <Navigate to="/login" replace />
   }
   if (user.role === 'admin') {
-    return <Navigate to="/admin" replace />
+    return <Navigate to={dashboardPath(user)} replace />
   }
-
-  const initialPaymentsLoading = paymentsLoading && !paymentsHydrated
-  const refreshingPayments = paymentsLoading && paymentsHydrated
-
-  const initials =
-    user.name
-      ?.split(/\s+/)
-      .filter(Boolean)
-      .map((w) => w[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase() || '?'
 
   return (
     <div className="mx-auto w-full max-w-5xl">
@@ -138,96 +134,107 @@ export default function AccountPage() {
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
           Your profile & billing
         </h1>
-        <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
-          Manage test checkouts and view payment history tied to this account.
-        </p>
+
       </header>
 
       <div className="space-y-8">
-        <Card>
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-5">
-              <div
-                className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-lg font-bold text-white shadow-lg shadow-indigo-500/25"
-                aria-hidden="true"
-              >
-                {initials}
-              </div>
-              <div className="min-w-0">
-                <SectionLabel>Signed in as</SectionLabel>
-                <p className="mt-1 truncate text-xl font-semibold text-slate-900">{user.name}</p>
-                <p className="truncate text-sm text-slate-600">{user.email}</p>
-              </div>
-            </div>
-            <span className="w-fit rounded-full bg-slate-100 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-700 ring-1 ring-slate-200/80">
-              {user.role}
-            </span>
-          </div>
-        </Card>
+     
 
         <Card>
-            <SectionLabel>Billing</SectionLabel>
-            <h2 className="mt-2 text-xl font-bold text-slate-900">Stripe test checkout</h2>
-            <p className="mt-3 text-sm leading-relaxed text-slate-600">
-              Opens Checkout in test mode. Default price comes from{' '}
-              <code className="rounded-lg bg-slate-100 px-2 py-0.5 font-mono text-[13px] text-indigo-700 ring-1 ring-slate-200">
-                STRIPE_PRICE_ID
-              </code>{' '}
-              on the server, or use the field below for a Price ID or a demo number (including negative).
-            </p>
-            <div className="mt-6">
-              <label htmlFor="priceId" className="text-sm font-semibold text-slate-800">
-                Price ID <span className="font-normal text-slate-500">(optional)</span>
-              </label>
-              <input
-                id="priceId"
-                type="text"
-                inputMode="text"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="price_… or e.g. -50"
-                value={priceId}
-                onChange={(e) => setPriceId(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 font-mono text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
-              />
-              <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                For demos: a whole number is stored on the session for fraud review; the charge still uses your
-                server Stripe price when no valid <span className="font-mono text-slate-600">price_</span> ID is
-                given.
-              </p>
+          <SectionLabel>Billing</SectionLabel>
+          <h2 className="mt-2 text-xl font-bold text-slate-900">Stripe checkout</h2>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-600">
+            Card details are entered on Stripe’s hosted page. Here you only choose an optional price, then continue on
+            the card below.
+          </p>
+
+          <div className="mt-8 flex justify-center sm:mt-10">
+            <div className="relative w-full max-w-[26rem]">
+              <div className="relative overflow-hidden rounded-[1.35rem] border border-white/10 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-6 shadow-2xl shadow-indigo-950/50 ring-1 ring-white/10 sm:rounded-3xl sm:p-8">
+                <div
+                  className="pointer-events-none absolute -right-16 -top-24 h-48 w-48 rounded-full bg-indigo-500/25 blur-3xl"
+                  aria-hidden
+                />
+                <div
+                  className="pointer-events-none absolute -bottom-20 -left-12 h-40 w-40 rounded-full bg-emerald-500/10 blur-3xl"
+                  aria-hidden
+                />
+
+                <div className="relative z-10 flex h-full min-h-0 flex-col">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/55">
+                        Secure checkout
+                      </p>
+                      <p className="mt-1 text-xs font-medium text-white/90">Stripe · Test mode</p>
+                    </div>
+                    <div
+                      className="flex h-11 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-amber-100 via-amber-300 to-amber-600 shadow-inner shadow-amber-900/30 ring-1 ring-amber-200/40"
+                      aria-hidden
+                    >
+                      <span className="text-[10px] font-bold text-amber-950/80">EMV</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 min-h-0 flex-1">
+                    <label
+                      htmlFor="priceId"
+                      className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45"
+                    >
+                      Price ID <span className="font-normal normal-case tracking-normal text-white/35">(optional)</span>
+                    </label>
+                    <input
+                      id="priceId"
+                      type="text"
+                      inputMode="text"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="e.g. 10 (demo) or price_…"
+                      value={priceId}
+                      onChange={(e) => setPriceId(e.target.value)}
+                      className="mt-2 w-full rounded-xl border border-white/15 bg-white/10 px-4 py-3 font-mono text-sm text-white shadow-inner outline-none ring-0 transition placeholder:text-white/35 focus:border-white/35 focus:bg-white/15 focus:ring-2 focus:ring-emerald-400/40"
+                    />
+                  </div>
+
+                  <div className="mt-5 flex items-end justify-between gap-4 border-t border-white/10 pt-5">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Cardholder</p>
+                      <p className="mt-0.5 truncate text-sm font-semibold tracking-wide text-white">
+                        {user.name || 'Account holder'}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Processor</p>
+                      <p className="mt-0.5 text-xs font-bold tracking-tight text-white/90">Stripe</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={startCheckout}
+                    disabled={payPending}
+                    className="mt-5 w-full cursor-pointer rounded-xl bg-white py-3.5 text-sm font-bold text-slate-900 shadow-lg shadow-black/25 transition hover:bg-emerald-50 disabled:pointer-events-none disabled:opacity-60"
+                  >
+                    {payPending ? 'Opening secure payment…' : 'Continue to payment'}
+                  </button>
+                </div>
+              </div>
             </div>
-            {payError ? (
-              <p
-                className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
-                role="alert"
-              >
-                {payError}
-              </p>
-            ) : null}
-            <button
-              type="button"
-              onClick={startCheckout}
-              disabled={payPending}
-              className="mt-6 w-full rounded-xl bg-emerald-600 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-500 disabled:pointer-events-none disabled:opacity-50"
+          </div>
+
+          {payError ? (
+            <p
+              className="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+              role="alert"
             >
-              {payPending ? 'Redirecting to Stripe…' : 'Pay with Stripe (test)'}
-            </button>
+              {payError}
+            </p>
+          ) : null}
         </Card>
 
       </div>
 
-      <footer className="mt-14 flex flex-wrap items-center gap-x-8 gap-y-4 border-t border-slate-200/80 pt-10">
-        <Link to="/" className="text-sm font-semibold text-slate-600 transition hover:text-slate-900">
-          ← Home
-        </Link>
-        <button
-          type="button"
-          onClick={() => logout()}
-          className="text-sm font-semibold text-rose-600 transition hover:text-rose-700"
-        >
-          Log out
-        </button>
-      </footer>
+     
     </div>
   )
 }

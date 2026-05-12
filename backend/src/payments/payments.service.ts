@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -47,7 +48,6 @@ export class PaymentsService {
     return id;
   }
 
-  /** True when the client entered a demo integer (e.g. -99), not a Stripe price id. */
   isDemoIntegerPriceField(value: string | undefined): boolean {
     if (!value?.trim()) return false;
     return /^-?\d+$/.test(value.trim());
@@ -55,7 +55,6 @@ export class PaymentsService {
 
   checkoutUrls(): { successUrl: string; cancelUrl: string } {
     const port = this.config.get<string>('PORT') ?? '3000';
-    // Stripe must return the browser to the SPA (Vite default 5173), not only the API port, or confirm-session never runs.
     const rawFrontend = this.config.get<string>('FRONTEND_APP_URL')?.trim()?.replace(/\/$/, '');
     const rawApp = this.config.get<string>('APP_BASE_URL')?.trim()?.replace(/\/$/, '');
     const base = rawFrontend || rawApp || 'http://localhost:5173';
@@ -116,6 +115,26 @@ export class PaymentsService {
     });
   }
 
+  async updateFraudReviewByAdmin(
+    paymentId: string,
+    status: 'flagged' | 'cleared',
+  ): Promise<StripePayment> {
+    const row = await this.paymentRepo.findOne({ where: { id: paymentId } });
+    if (!row) {
+      throw new NotFoundException('Payment not found');
+    }
+    if (status === 'cleared') {
+      row.fraudFlagged = false;
+      row.fraudReason = null;
+    } else {
+      row.fraudFlagged = true;
+      if (!row.fraudReason?.trim()) {
+        row.fraudReason = 'Manually flagged by administrator.';
+      }
+    }
+    return this.paymentRepo.save(row);
+  }
+
   private async enqueueCompletedCheckout(sessionId: string): Promise<void> {
     const jobId = `checkout-${sessionId}`;
     const existing = await this.checkoutFraudQueue.getJob(jobId);
@@ -144,11 +163,6 @@ export class PaymentsService {
     this.logger.log(`Queued fraud pipeline for checkout session=${sessionId}`);
   }
 
-  /**
-   * After checkout succeeds, enqueues async fraud analysis; the worker persists
-   * the row (cleared or flagged). Webhooks remain the primary enqueue path in
-   * production; this covers local dev when Stripe cannot reach the webhook URL.
-   */
   async confirmCheckoutSessionForUser(
     sessionId: string,
     userId: string,

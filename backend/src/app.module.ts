@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { User } from './auth/entities/user.entity';
+import { FraudPrompt } from './payments/entities/fraud-prompt.entity';
 import { StripePayment } from './payments/entities/stripe-payment.entity';
 import { PaymentsModule } from './payments/payments.module';
 
@@ -33,7 +34,7 @@ import { PaymentsModule } from './payments/payments.module';
         return {
           type: 'postgres' as const,
           url,
-          entities: [User, StripePayment],
+          entities: [User, StripePayment, FraudPrompt],
           synchronize: config.get<string>('NODE_ENV') !== 'production',
           ssl: useSsl ? { rejectUnauthorized: false } : false,
         };
